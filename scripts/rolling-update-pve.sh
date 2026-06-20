@@ -45,11 +45,8 @@ HOSTS=()
 
 # ssh コマンドの上書き。--ssh または環境変数 SSH_COMMAND が空なら既定を使う。
 SSH_OVERRIDE="${SSH_COMMAND:-}"
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 
-log()  { printf '\033[1;32m[*]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
-err()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pve-common.sh"
 
 usage() {
     sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'
@@ -78,24 +75,7 @@ done
 case "$REBOOT_MODE" in required|always|never) ;; *) err "--reboot は required|always|never"; exit 1 ;; esac
 case "$DRAIN_MODE"  in maintenance|none) ;;     *) err "--drain は maintenance|none"; exit 1 ;; esac
 
-# 実際に使う ssh コマンドを確定する。上書き時はユーザ指定をそのまま使い、
-# 既定の接続オプションは付与しない (ユーザが完全に制御する)。
-if [[ -n "$SSH_OVERRIDE" ]]; then
-    read -r -a SSH_CMD <<< "$SSH_OVERRIDE"
-else
-    SSH_CMD=(ssh "${SSH_OPTS[@]}")
-fi
-
-# SSH ヘルパ。第 1 引数がホスト、以降が remote で実行するコマンド。
-rssh() {
-    local host="$1"; shift
-    "${SSH_CMD[@]}" "${SSH_USER}@${host}" "$@"
-}
-
-# 指定ホストの Proxmox ノード名 (pvecm 上の名前) を取得する。
-node_name() {
-    rssh "$1" hostname
-}
+build_ssh_cmd
 
 # 到達可能なホストを返す (除外ホストを 1 つ指定可)。
 reference_host() {
@@ -110,15 +90,6 @@ reference_host() {
     return 1
 }
 
-cluster_quorate() {
-    rssh "$1" 'pvecm status 2>/dev/null | grep -qi "Quorate:\s*Yes"'
-}
-
-# 指定ホストに SSH 到達できないとき成功を返す (ダウン待ち用)。
-node_unreachable() {
-    ! rssh "$1" true >/dev/null 2>&1
-}
-
 resolve_hosts() {
     if [[ ${#HOSTS[@]} -gt 0 ]]; then
         return 0
@@ -128,18 +99,6 @@ resolve_hosts() {
     log "起点 ${entry} の pvecm からクラスタ構成を検出します"
     mapfile -t HOSTS < <(rssh "$entry" "pvecm nodes 2>/dev/null | awk '\$1 ~ /^[0-9]+\$/ {print \$3}'")
     [[ ${#HOSTS[@]} -gt 0 ]] || { err "ノードを検出できませんでした。"; exit 1; }
-}
-
-wait_for() {  # wait_for "説明" "判定コマンド..." ; タイムアウトで 1
-    local desc="$1"; shift
-    local deadline=$(( SECONDS + WAIT_TIMEOUT ))
-    while ! "$@" >/dev/null 2>&1; do
-        if (( SECONDS >= deadline )); then
-            err "タイムアウト: ${desc}"
-            return 1
-        fi
-        sleep 5
-    done
 }
 
 update_node() {
@@ -222,7 +181,6 @@ update_node() {
 }
 
 main() {
-    command -v "${SSH_CMD[0]}" >/dev/null 2>&1 || { err "ssh コマンドが見つかりません: ${SSH_CMD[0]}"; exit 1; }
     resolve_hosts
 
     log "対象ノード (この順で処理): ${HOSTS[*]}"
