@@ -46,6 +46,7 @@ HOSTS=()
 # ssh コマンドの上書き。--ssh または環境変数 SSH_COMMAND が空なら既定を使う。
 SSH_OVERRIDE="${SSH_COMMAND:-}"
 
+# shellcheck source=scripts/lib/pve-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pve-common.sh"
 
 usage() {
@@ -141,7 +142,8 @@ update_node() {
     # apt の出力は常にログへ残す。既定はコンソールに流さず進捗のみ、
     # --verbose のときだけ tee でライブ表示する。
     mkdir -p "$LOG_DIR"
-    local logfile="${LOG_DIR}/${nodename}-$(date +%Y%m%d-%H%M%S).log"
+    local logfile
+    logfile="${LOG_DIR}/${nodename}-$(date +%Y%m%d-%H%M%S).log"
     log "パッケージを更新します (apt-get update / dist-upgrade)"
     if [[ $VERBOSE -eq 1 ]]; then
         rssh "$host" "$upgrade" 2>&1 | tee "$logfile"
@@ -156,7 +158,7 @@ update_node() {
     case "$REBOOT_MODE" in
         always)   need_reboot=1 ;;
         never)    need_reboot=0 ;;
-        required) rssh "$host" 'test -f /var/run/reboot-required' && need_reboot=1 || true ;;
+        required) if rssh "$host" 'test -f /var/run/reboot-required'; then need_reboot=1; fi ;;
     esac
 
     if [[ $need_reboot -eq 1 ]]; then

@@ -38,6 +38,7 @@ HOST=""
 
 SSH_OVERRIDE="${SSH_COMMAND:-}"
 
+# shellcheck source=scripts/lib/pve-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pve-common.sh"
 
 usage() {
